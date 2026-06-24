@@ -1,6 +1,13 @@
 import { App, Modal, Setting, TFile, parseLinktext } from "obsidian";
-import { compactContent } from "src/ai/contextCompactor";
 import { t } from "src/translations/helper";
+
+// Simple content compactor function
+function compactContent(content: string): string {
+  return content
+    .replace(/```[\s\S]*?```/g, "[code block]")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 // 定义输入结果的接口
 export interface ITextInputResult {

@@ -30,10 +30,6 @@ import { StatusBar } from "src/components/StatusBar";
 import { CommandsManager } from "src/commands/commands";
 import { InsertLinkModal } from "src/modals/insertLinkModal";
 import { InsertCalloutModal } from "src/modals/insertCalloutModal";
-import { AIEditorManager } from "src/ai/AIEditorManager";
-import { AI_TOOLBAR_COMMAND_ID, createAIToolbarCommand } from "src/ai/toolbarCommand";
-import { shouldShowAIFeatures } from "src/util/locale";
-import { getDefaultCustomPromptTemplates, type CustomPromptTemplate } from "src/ai/types";
 
 let activeDocument: Document;
 
@@ -141,7 +137,6 @@ export default class editingToolbarPlugin extends Plugin {
 
   // 添加设置标签页引用
   settingTab: editingToolbarSettingTab;
-  aiManager: AIEditorManager;
 
   // 性能优化：工具栏 DOM 缓存
   private toolbarCache: Map<ToolbarStyleKey, HTMLElement> = new Map();
@@ -200,49 +195,6 @@ export default class editingToolbarPlugin extends Plugin {
     });
   }
 
-  private removeToolbarCommandById(commands: any[] | undefined, commandId: string): void {
-    if (!Array.isArray(commands)) return;
-
-    for (let index = commands.length - 1; index >= 0; index--) {
-      const command = commands[index];
-      if (!command || typeof command !== "object") continue;
-
-      if (command.id === commandId) {
-        commands.splice(index, 1);
-        continue;
-      }
-
-      if (Array.isArray(command.SubmenuCommands)) {
-        this.removeToolbarCommandById(command.SubmenuCommands, commandId);
-      }
-    }
-  }
-
-  private syncAIToolbarCommandVisibility(): void {
-    const commandGroups = [
-      this.settings.menuCommands,
-      this.settings.followingCommands,
-      this.settings.topCommands,
-      this.settings.fixedCommands,
-      this.settings.mobileCommands,
-    ];
-
-    commandGroups.forEach((commands) => {
-      if (!Array.isArray(commands)) return;
-
-      this.removeToolbarCommandById(commands, AI_TOOLBAR_COMMAND_ID);
-
-      if (this.settings.ai.enabled && shouldShowAIFeatures()) {
-        commands.unshift(createAIToolbarCommand());
-      }
-    });
-  }
-  public refreshAIAvailability(): void {
-    this.syncAIToolbarCommandVisibility();
-    setTimeout(() => {
-      dispatchEvent(new Event("editingToolbar-NewCommand"));
-    }, 100);
-  }
 
   private getPluginCommandId(commandId: string): string {
     return `${this.manifest.id}:${commandId}`;
@@ -346,92 +298,6 @@ export default class editingToolbarPlugin extends Plugin {
     return actions;
   }
 
-  private buildAIContextActions(editor: Editor): EditorContextMenuAction[] {
-    if (!shouldShowAIFeatures()) {
-      return [];
-    }
-
-    if (!this.settings.ai.enabled) {
-      return [
-        {
-          title: t("Enable AI Editor"),
-          callback: () => this.openPluginSettingsTab(),
-        },
-      ];
-    }
-
-    const hasSelection = editor.somethingSelected();
-    const canUseImplicitBlockRewrite = Platform.isMobileApp;
-    const isCanvasScene = this.app.workspace.activeLeaf?.view?.getViewType?.() === "canvas";
-
-    const primaryActions: EditorContextMenuAction[] = [
-      { title: t("Trigger AI Inline Completion"), commandId: "ai-inline-completion" },
-    ];
-
-    const rewriteActions: EditorContextMenuAction[] = [
-      { title: t("AI Custom Rewrite"), commandId: "ai-rewrite-custom" },
-      { title: t("Improve writing"), commandId: "ai-rewrite-improve" },
-      { title: t("Fix spelling & grammar"), commandId: "ai-rewrite-fix-grammar" },
-      { title: t("Summarize"), commandId: "ai-rewrite-summarize" },
-      { title: t("Explain this"), commandId: "ai-rewrite-explain" },
-      { title: t("Continue writing"), commandId: "ai-rewrite-continue" },
-      { title: t("Convert to list"), commandId: "ai-toolbox-list" },
-      { title: t("Convert to table"), commandId: "ai-toolbox-table" },
-      { title: t("Generate frontmatter"), commandId: "ai-toolbox-frontmatter" },
-      { title: t("Convert to canvas"), commandId: "ai-toolbox-canvas" },
-    ];
-    const canvasActions: EditorContextMenuAction[] = isCanvasScene
-      ? [
-        { title: t("Canvas global prompt"), commandId: "ai-canvas-global-prompt" },
-        { title: t("Expand current canvas node"), commandId: "ai-canvas-expand" },
-      ]
-      : [];
-
-    if (hasSelection || canUseImplicitBlockRewrite) {
-      return [...primaryActions, ...rewriteActions, ...canvasActions];
-    }
-
-    return [
-      ...primaryActions,
-       { title: t("AI Custom Rewrite"), commandId: "ai-rewrite-custom" },
-      { title: t("Continue writing"), commandId: "ai-rewrite-continue" },
-      { title: t("Generate frontmatter"), commandId: "ai-toolbox-frontmatter" },
-      { title: t("Convert to canvas"), commandId: "ai-toolbox-canvas" },
-      ...canvasActions,
-    ];
-  }
-
-  private buildCanvasNodeAIContextActions(): EditorContextMenuAction[] {
-    if (!shouldShowAIFeatures()) {
-      return [];
-    }
-
-    if (!this.settings.ai.enabled) {
-      return [
-        {
-          title: t("Enable AI Editor"),
-          callback: () => this.openPluginSettingsTab(),
-        },
-      ];
-    }
-
-    const expansionActions = this.aiManager.getCanvasExpansionPromptSuggestions().map((suggestion) => ({
-      title: suggestion.label,
-      callback: () => {
-        void this.aiManager.expandCurrentCanvasNode(suggestion.value);
-      },
-    }));
-
-    return [
-      { title: t("Expand current canvas node"), commandId: "ai-canvas-expand" },
-      ...expansionActions,
-      { title: t("Canvas global prompt"), commandId: "ai-canvas-global-prompt" },
-    ];
-  }
-
-  private handleCanvasNodeContextMenu = (menu: Menu): void => {
-    this.addEditorContextSubmenu(menu, t("AI Tools"), "sparkles", this.buildCanvasNodeAIContextActions());
-  };
 
   private handleEditorContextMenu = (
     menu: Menu,
@@ -439,9 +305,6 @@ export default class editingToolbarPlugin extends Plugin {
     _view: MarkdownView,
   ): void => {
     this.addEditorContextSubmenu(menu, t("Text Tools"), "whole-word", this.buildTextContextActions(editor));
-    if (shouldShowAIFeatures()) {
-      this.addEditorContextSubmenu(menu, t("AI Tools"), "sparkles", this.buildAIContextActions(editor));
-    }
   };
 
   async onload(): Promise<void> {
@@ -449,16 +312,9 @@ export default class editingToolbarPlugin extends Plugin {
     console.log("editingToolbar v" + currentVersion + " loaded");
   
     requireApiVersion("0.15.0") ? activeDocument = activeWindow.document : activeDocument = window.document;
-  
+
     await this.loadSettings();
 
-    this.aiManager = new AIEditorManager(this);
-    this.aiManager.onload();
-
-    if (requireApiVersion("0.15.0") && typeof this.registerEditorExtension === "function") {
-      this.registerEditorExtension(this.aiManager.createExtension());
-    }
-  
     // IMPORTANT: wire up per-style getters/setters before we start using appearance fields
     this.initPerStyleAppearance();
   
@@ -481,12 +337,6 @@ export default class editingToolbarPlugin extends Plugin {
           this.handleeditingToolbar();
         }
       }, 100);
-
-      setTimeout(() => {
-        if (shouldShowAIFeatures()) {
-          void this.aiManager.maybeShowAIOnboarding();
-        }
-      }, 1200);
     });
     this.init_evt(activeDocument, editor);
     if (requireApiVersion("0.15.0")) {
@@ -635,9 +485,6 @@ this.app.workspace.onLayoutReady(async () => {
           // 判断光标是否在有序列表行（简单匹配数字开头）
     );
     this.registerEvent(
-      this.app.workspace.on("canvas:node-menu", this.handleCanvasNodeContextMenu)
-    );
-    this.registerEvent(
       // @ts-ignore
       this.app.workspace.on('url-menu', (menu: Menu, url: string, view: MarkdownView) => {
         // 添加自定义菜单项
@@ -720,8 +567,6 @@ this.app.workspace.onLayoutReady(async () => {
   }
 
   onunload(): void {
-    this.aiManager?.onunload();
-
     // 注销工作区事件
     this.app.workspace.off("active-leaf-change", this.handleeditingToolbar);
     this.app.workspace.off("layout-change", this.handleeditingToolbar_layout);
@@ -914,58 +759,7 @@ this.app.workspace.onLayoutReady(async () => {
 
   async loadSettings() {
     const loadedData = await this.loadData();
-    const loadedAI = loadedData?.ai;
-    const legacyCustomModelConfigured = !!(
-      loadedAI?.customModel?.baseUrl?.trim?.() ||
-      loadedAI?.customModel?.model?.trim?.() ||
-      loadedAI?.customModel?.apiKey?.trim?.()
-    );
-    const resolvedCustomPromptTemplates = Array.isArray(loadedAI?.customPromptTemplates)
-      ? loadedAI.customPromptTemplates.map((template: CustomPromptTemplate) => ({ ...template }))
-      : getDefaultCustomPromptTemplates();
-    const resolvedCustomPromptHistory = Array.isArray(loadedAI?.customPromptHistory)
-      ? [...loadedAI.customPromptHistory]
-      : [];
-
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData);
-    this.settings.ai = {
-      ...DEFAULT_SETTINGS.ai,
-      ...(loadedAI || {}),
-      enableCustomModel: loadedAI?.enableCustomModel ?? legacyCustomModelConfigured,
-      pkmerModelRouting: {
-        ...DEFAULT_SETTINGS.ai.pkmerModelRouting,
-        ...(loadedAI?.pkmerModelRouting || {}),
-      },
-      pkmer: {
-        ...DEFAULT_SETTINGS.ai.pkmer,
-        ...(loadedAI?.pkmer || {}),
-      },
-      customModel: {
-        ...DEFAULT_SETTINGS.ai.customModel,
-        ...(loadedAI?.customModel || {}),
-      },
-      customPromptHistory: resolvedCustomPromptHistory,
-      customPromptTemplates: resolvedCustomPromptTemplates,
-    };
-
-    if (loadedAI?.consentAccepted === undefined && loadedAI?.enabled === true) {
-      this.settings.ai.consentAccepted = true;
-    }
-    if (loadedAI !== undefined && loadedAI?.onboardingShown === undefined) {
-      this.settings.ai.onboardingShown = true;
-    }
-    if (loadedAI?.pkmerModelRouting === undefined && loadedAI?.pkmerModel?.trim?.()) {
-      const legacyModel = loadedAI.pkmerModel.trim();
-      this.settings.ai.pkmerModelRouting = {
-        mode: "manual",
-        completion: legacyModel,
-        rewrite: legacyModel,
-        reasoning: legacyModel,
-        artifact: legacyModel,
-      };
-    }
-
-    this.syncAIToolbarCommandVisibility();
 
     // 配置迁移逻辑：将旧的 positionStyle 配置迁移到新的 enable 开关
     // 判断条件：所有新开关都是 false（说明用户还没有配置过新版）
@@ -1057,7 +851,6 @@ updateCurrentCommands(commands: any[], style?: string): void {
 }
 
   async saveSettings() {
-    this.syncAIToolbarCommandVisibility();
     await this.saveData(this.settings);
   }
 
